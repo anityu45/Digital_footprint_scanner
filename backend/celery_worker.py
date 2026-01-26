@@ -1,10 +1,11 @@
 from celery import Celery
 from backend.database import update_scan_result
-from backend.osint.email_osint import check_gravatar, check_hibp
+# We now import the new aggregator function for email
+from backend.osint.email_osint import run_email_checks
 from backend.osint.username_osint import check_github, check_whatsmyname
 from backend.osint.domain_osint import check_crt_sh
 
-# Configure Celery
+# Configure Celery to use Redis
 celery_app = Celery(
     "osint_worker",
     broker="redis://localhost:6379/0",
@@ -18,42 +19,48 @@ def run_osint_scan(scan_id, email, username, domain):
 
     print(f"Starting scan for: {email}, {username}, {domain}")
 
-    # 1. Email Checks
+    # --- 1. Email Checks (Upgraded "Holehe" Logic) ---
     if email:
-        grav = check_gravatar(email)
-        if grav['found']:
-            risk_score += 10
-            findings.append(grav['description'])
+        # This returns a list of results (Gravatar, Spotify, Adobe, etc.)
+        email_results = run_email_checks(email)
         
-        hibp = check_hibp(email)
-        if hibp['found']:
-            risk_score += 30
-            findings.append(hibp['description'])
+        for res in email_results:
+            # Add the finding text
+            findings.append(res['description'])
+            
+            # Apply Scoring based on the source
+            if res['site'] == "Gravatar":
+                risk_score += 10
+            elif res['site'] in ["Spotify", "Adobe", "WordPress"]:
+                # Active accounts on major platforms indicate a higher digital footprint
+                risk_score += 20
 
-    # 2. Username Checks
+    # --- 2. Username Checks ---
     if username:
+        # GitHub Check
         gh = check_github(username)
         if gh['found']:
             risk_score += 10
             findings.append(gh['description'])
         
+        # WhatsMyName (Social Media) Check
         wmn = check_whatsmyname(username)
         if wmn['found']:
             risk_score += 20
             findings.append(wmn['description'])
 
-    # 3. Domain Checks
+    # --- 3. Domain Checks ---
     if domain:
         crt = check_crt_sh(domain)
         if crt['found']:
             risk_score += 15
             findings.append(crt['description'])
 
-    # Cap score at 100
+    # Cap score at 100 (Normalization)
     risk_score = min(risk_score, 100)
 
-    # Save to DB
+    # Save final results to the SQLite database
     update_scan_result(scan_id, findings, risk_score)
-    print(f"Scan {scan_id} complete. Score: {risk_score}")
     
+    print(f"Scan {scan_id} complete. Score: {risk_score}")
     return {"status": "done", "score": risk_score}
