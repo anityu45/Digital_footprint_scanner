@@ -1,4 +1,4 @@
-# 🕵️ Digital Footprint Intelligence (OSINT Tool)
+#Digital Footprint Intelligence (OSINT Tool)
 
 A full-stack Open Source Intelligence (OSINT) tool that helps you visualize your digital footprint. It scans emails, usernames, and domains to find public profiles, data breaches, and security risks, presenting everything in a professional Identity Graph.
 
