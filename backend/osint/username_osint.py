@@ -1,31 +1,41 @@
-from duckduckgo_search import DDGS
-from urllib.parse import urlparse
+import subprocess
+import sys
+import shutil
 
-def get_domain_name(url):
-    try:
-        return urlparse(url).netloc.replace("www.", "")
-    except:
-        return url
-
-def check_username_list(username):
-    """Searches the web for the username."""
-    if not username: return []
-
-    print(f"🕵️ Searching web for: {username}...")
-    found_links = []
-    query = f'inurl:"{username}"'
+def check_username_with_sherlock(username):
+    """
+    Runs the OFFICIAL Sherlock tool to find accounts.
+    """
+    print(f"🕵️ Starting Deep Sherlock Scan for: {username}...")
     
-    try:
-        with DDGS() as ddgs:
-            results = ddgs.text(query, max_results=10)
-            if results:
-                for r in results:
-                    found_links.append({
-                        "site": get_domain_name(r.get('href')),
-                        "url": r.get('href'),
-                        "title": r.get('title')
-                    })
-    except Exception as e:
-        print(f"Search error: {e}")
+    # Check if sherlock is installed
+    sherlock_cmd = shutil.which("sherlock")
+    if not sherlock_cmd:
+        # Fallback if installed via pip as a module
+        command = [sys.executable, "-m", "sherlock", username, "--timeout", "1", "--print-found"]
+    else:
+        command = [sherlock_cmd, username, "--timeout", "1", "--print-found"]
 
-    return found_links
+    try:
+        # Run the process
+        result = subprocess.run(command, capture_output=True, text=True)
+        findings = []
+        
+        # Parse output
+        for line in result.stdout.splitlines():
+            if "[+]" in line:
+                # Format: "[+] SiteName: URL"
+                clean = line.replace("[+]", "").strip()
+                if ": " in clean:
+                    parts = clean.split(": ", 1)
+                    findings.append({"site": parts[0], "url": parts[1]})
+        
+        return findings
+
+    except Exception as e:
+        print(f"Sherlock Error: {e}")
+        return []
+
+# Wrapper
+def check_username_list(username):
+    return check_username_with_sherlock(username)
