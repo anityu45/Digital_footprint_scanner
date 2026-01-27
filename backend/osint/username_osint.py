@@ -1,39 +1,31 @@
-import requests
+from duckduckgo_search import DDGS
+from urllib.parse import urlparse
 
-def check_github(username):
-    if not username:
-        return {"found": False, "description": "No username provided"}
-        
-    url = f"https://api.github.com/users/{username}"
+def get_domain_name(url):
     try:
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            return {"found": True, "description": "GitHub account exists (+10 Risk)"}
+        return urlparse(url).netloc.replace("www.", "")
     except:
-        pass
-    return {"found": False, "description": "GitHub account not found"}
+        return url
 
-def check_whatsmyname(username):
-    if not username:
-        return {"found": False, "description": "No username provided"}
+def check_username_list(username):
+    """Searches the web for the username."""
+    if not username: return []
 
-    # Simplified check on a few major sites
-    sites = [
-        {"name": "Twitter/X", "url": f"https://twitter.com/{username}"},
-        {"name": "Instagram", "url": f"https://www.instagram.com/{username}/"},
-        {"name": "Pastebin", "url": f"https://pastebin.com/u/{username}"}
-    ]
+    print(f"🕵️ Searching web for: {username}...")
+    found_links = []
+    query = f'inurl:"{username}"'
     
-    found_sites = []
-    for site in sites:
-        try:
-            resp = requests.get(site["url"], timeout=3)
-            if resp.status_code == 200:
-                found_sites.append(site["name"])
-        except:
-            continue
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(query, max_results=10)
+            if results:
+                for r in results:
+                    found_links.append({
+                        "site": get_domain_name(r.get('href')),
+                        "url": r.get('href'),
+                        "title": r.get('title')
+                    })
+    except Exception as e:
+        print(f"Search error: {e}")
 
-    if found_sites:
-        return {"found": True, "description": f"Username found on: {', '.join(found_sites)} (+20 Risk)"}
-    
-    return {"found": False, "description": "Username not found on checked lists"}
+    return found_links
