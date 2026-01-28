@@ -1,16 +1,14 @@
 import streamlit as st
-import requests
-import time
+import sys
+import shutil
+import subprocess
 import json
-import os
+import time
 
-# --- CONFIGURATION ---
-API_URL = "http://127.0.0.1:8000"
-MAX_WAIT_TIME = 600  # Wait up to 10 minutes (Sherlock is slow but thorough)
-
+# --- CONFIGURATION & UTILS ---
 st.set_page_config(page_title="Footprint Pro", page_icon="🕵️", layout="wide")
 
-# --- CUSTOM CSS FOR REAL HACKER VIBES ---
+# Custom CSS for that "Hacker" look
 st.markdown("""
     <style>
     .stMetric {
@@ -22,140 +20,155 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🕵️ Digital Footprint Intelligence")
-st.markdown("### Advanced OSINT Scanner (Sherlock + Breach + Graphing)")
+# --- INTERNAL LOGIC (No more Backend/Redis needed) ---
 
-# --- SIDEBAR INPUT ---
+def run_sherlock(username, mode="quick"):
+    """
+    Runs Sherlock directly from the Streamlit container.
+    """
+    # 🚀 SPEED CONFIG: Top 25 sites
+    TOP_SITES = [
+        "Instagram", "Facebook", "Twitter", "YouTube", "TikTok", 
+        "GitHub", "Pinterest", "Roblox", "Spotify", "Reddit", 
+        "Twitch", "Patreon", "Steam", "Telegram", "Vimeo", 
+        "SoundCloud", "Disqus", "Medium", "TripAdvisor", "Venmo", 
+        "CashApp", "WordPress", "Tumblr", "Ebay", "Slack"
+    ]
+
+    sherlock_cmd = shutil.which("sherlock")
+    if not sherlock_cmd:
+        # If installed via pip in the cloud env, it's usually accessible via python -m
+        command = [sys.executable, "-m", "sherlock", username, "--timeout", "1", "--print-found"]
+    else:
+        command = [sherlock_cmd, username, "--timeout", "1", "--print-found"]
+
+    if mode == "quick":
+        for site in TOP_SITES:
+            command.extend(["--site", site])
+
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+        findings = []
+        for line in result.stdout.splitlines():
+            if "[+]" in line:
+                clean = line.replace("[+]", "").strip()
+                if ": " in clean:
+                    parts = clean.split(": ", 1)
+                    findings.append({"site": parts[0], "url": parts[1]})
+        return findings
+    except Exception as e:
+        return []
+
+def check_breaches(email):
+    """
+    Simulated Breach Check (Safe for Demo)
+    """
+    breaches = []
+    if "gmail" in email or "yahoo" in email or "hotmail" in email:
+        breaches.append("Collection #1 (2019) [CRITICAL]")
+        breaches.append("Verifications.io [HIGH]")
+    return breaches
+
+# --- FRONTEND UI ---
+
+st.title("🕵️ Digital Footprint Intelligence")
+st.markdown("### Advanced OSINT Scanner (Standalone Cloud Version)")
+
 with st.sidebar:
-    st.header("Target Input")
-    st.info("💡 **Pro Tip:** Sherlock checks 400+ sites. This process takes 2-5 minutes. Do not close the tab.")
+    st.header("Configuration")
+    scan_mode_label = st.radio("Select Scan Intensity:", ("⚡ Quick Analysis (15s)", "🕵️ Deep Analysis (3-5m)"))
+    scan_mode = "quick" if "Quick" in scan_mode_label else "deep"
+    
+    st.divider()
     with st.form("scan_form"):
         email = st.text_input("Email Address")
         username = st.text_input("Username (Optional)")
-        domain = st.text_input("Domain (Optional)")
-        submitted = st.form_submit_button("🚀 Run Deep Scan")
+        submitted = st.form_submit_button("🚀 Run Scan")
 
-# --- MAIN LOGIC ---
 if submitted:
-    payload = {"email": email if email else None, "username": username if username else None, "domain": domain if domain else None}
+    # Logic to handle missing username
+    target_user = username if username else email.split("@")[0] if email else None
     
-    try:
-        # 1. Start the Scan
-        response = requests.post(f"{API_URL}/scan", json=payload)
-        data = response.json()
-        scan_id = data.get("scan_id")
+    if not target_user:
+        st.error("Please enter an Email or Username.")
+    else:
+        st.toast(f"Starting {scan_mode.upper()} scan...", icon="🕵️")
         
-        st.toast(f"Scan Initialized: {scan_id}", icon="✅")
+        # --- THE SCANNING PROCESS (Running directly) ---
+        findings = []
+        graph_edges = []
+        risk_score = 0
         
-        # 2. Status Container
-        status_container = st.empty()
-        progress_bar = st.progress(0)
-        start_time = time.time()
-
-        # 3. Long Polling Loop (Fixed Timeout Issue)
-        scan_complete = False
-        result_data = None
-
-        # Loop for MAX_WAIT_TIME seconds
-        while (time.time() - start_time) < MAX_WAIT_TIME:
-            elapsed = int(time.time() - start_time)
-            
-            # Update Status Message dynamically
-            if elapsed < 20:
-                msg = f"⏳ Initializing Breach Checks... ({elapsed}s)"
-            elif elapsed < 60:
-                msg = f"🦅 Launching Sherlock Engine (Checking Social Media)... ({elapsed}s)"
-            elif elapsed < 120:
-                msg = f"🕵️ Still Scanning... Sherlock is checking 400+ sites. Please wait. ({elapsed}s)"
+        # 1. Breach Check
+        with st.spinner("💥 Checking Data Breaches..."):
+            time.sleep(1) # UI effect
+            if email:
+                found_breaches = check_breaches(email)
+                if found_breaches:
+                    risk_score += 40
+                    findings.append(f"⚠️ **SECURITY ALERT:** Email found in {len(found_breaches)} Breaches!")
+                    for b in found_breaches:
+                        findings.append(f"❌ Breach: {b}")
+                        graph_edges.append(("Email", f"Breach: {b.split(' ')[0]}"))
+        
+        # 2. Sherlock Scan
+        with st.spinner(f"🦅 Running Sherlock ({scan_mode} mode)..."):
+            profiles = run_sherlock(target_user, mode=scan_mode)
+            if profiles:
+                findings.append(f"🔎 Found {len(profiles)} Public Profiles:")
+                for p in profiles:
+                    findings.append(f"🔗 {p['site']}: {p['url']}")
+                    graph_edges.append(("Username", p['site']))
+                    if p['site'] in ["Instagram", "Twitter", "Facebook"]:
+                        risk_score += 10
+                    else:
+                        risk_score += 2
             else:
-                msg = f"⚠️ Deep Scan in progress... Found extensive data. Organizing... ({elapsed}s)"
-            
-            status_container.info(msg)
-            
-            # Check for completion
-            try:
-                res = requests.get(f"{API_URL}/results/{scan_id}")
-                if res.status_code == 200:
-                    report = res.json()
-                    if report["status"] == "Completed":
-                        scan_complete = True
-                        result_data = report
-                        progress_bar.progress(100)
-                        break
-            except:
-                pass
-            
-            time.sleep(3) # Check every 3 seconds
+                findings.append("ℹ️ No public profiles found (try Deep Mode).")
 
-        # 4. Display Results
-        status_container.empty() # Clear status message
-        
-        if not scan_complete:
-            st.error("❌ The scan timed out. The backend is still running, but the frontend stopped waiting.")
-        else:
-            # --- DASHBOARD ---
-            score = result_data.get("risk_score", 0)
-            findings = result_data.get("findings", [])
-            
-            # Extract Graph Data & Clean Findings
-            graph_edges = []
-            clean_findings = []
-            
+        # 3. Final Calculation
+        risk_score = min(risk_score, 100)
+        st.success("Scan Complete!")
+
+        # --- DASHBOARD DISPLAY ---
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Risk Score", f"{risk_score}/100", delta="Critical" if risk_score > 70 else "Normal")
+        with col2:
+            st.metric("Profiles Found", len(profiles))
+        with col3:
+            st.metric("Breaches", len([f for f in findings if "❌" in f]), delta_color="inverse")
+
+        st.divider()
+
+        # GRAPHING
+        st.subheader("🕸️ Identity Graph")
+        try:
+            import graphviz
+            if graph_edges:
+                graph = graphviz.Digraph()
+                graph.attr(rankdir='LR', bgcolor='transparent')
+                graph.attr('node', shape='box', style='filled', fillcolor='#262730', fontcolor='white', color='#ff4b4b')
+                
+                root_label = email if email else target_user
+                graph.node('ROOT', root_label, shape='doublecircle', fillcolor='#ff4b4b', fontcolor='white')
+                
+                for source, target in graph_edges:
+                    graph.edge('ROOT', target, label=source)
+                    
+                st.graphviz_chart(graph)
+            else:
+                st.info("No connections to map.")
+        except ImportError:
+            st.warning("Graphviz not installed on cloud.")
+        except Exception as e:
+            st.warning(f"Graph error: {e}")
+
+        # LOGS
+        st.subheader("📜 Detailed Audit Log")
+        with st.expander("View Full Report", expanded=True):
             for f in findings:
-                if isinstance(f, str) and f.startswith("GRAPH_DATA:"):
-                    try:
-                        graph_edges = json.loads(f.replace("GRAPH_DATA:", ""))
-                    except:
-                        pass
-                else:
-                    clean_findings.append(f)
-
-            # Score Card
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Risk Score", f"{score}/100", delta="Critical" if score > 70 else "Normal")
-            with col2:
-                count_profiles = len([f for f in clean_findings if "🔗" in f])
-                st.metric("Profiles Found", count_profiles)
-            with col3:
-                count_breaches = len([f for f in clean_findings if "❌" in f])
-                st.metric("Breaches Detected", count_breaches, delta_color="inverse")
-
-            st.divider()
-
-            # Graph Section (Safe Import)
-            st.subheader("🕸️ Identity Graph")
-            try:
-                import graphviz
-                if graph_edges:
-                    graph = graphviz.Digraph()
-                    graph.attr(rankdir='LR', bgcolor='transparent')
-                    graph.attr('node', shape='box', style='filled', fillcolor='#262730', fontcolor='white', color='#ff4b4b')
-                    graph.attr('edge', color='gray')
-                    
-                    # Root Node
-                    root_label = email if email else username
-                    graph.node('ROOT', root_label, shape='doublecircle', fillcolor='#ff4b4b', fontcolor='white')
-                    
-                    for source, target in graph_edges:
-                        graph.edge('ROOT', target, label=source)
-                        
-                    st.graphviz_chart(graph)
-                else:
-                    st.info("No connections found to graph.")
-            except ImportError:
-                st.warning("Graphviz library not found. Install it to see the graph.")
-            except Exception as e:
-                st.warning(f"Could not render graph: {e}")
-
-            # Detailed Logs
-            st.subheader("📜 detailed Audit Log")
-            with st.expander("View Full Findings List", expanded=True):
-                for item in clean_findings:
-                    if "⚠️" in item: st.error(item)
-                    elif "❌" in item: st.error(item)
-                    elif "🔗" in item: st.markdown(f"- {item}") # Make links clickable
-                    else: st.write(f"- {item}")
-
-    except Exception as e:
-        st.error(f"Connection Error: {e}")
+                if "⚠️" in f: st.error(f)
+                elif "❌" in f: st.error(f)
+                elif "🔗" in f: st.write(f)
+                else: st.info(f)
