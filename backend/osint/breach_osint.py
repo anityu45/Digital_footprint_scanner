@@ -12,7 +12,7 @@ def check_data_breaches(email):
     
     domain = email.split("@")[-1]
     
-    # Mock Logic: If it's a generic email, show a "Sample Breach" to impress the user
+    
     if "gmail" in domain or "yahoo" in domain or "hotmail" in domain:
         breaches.append({
             "name": "Collection #1 (2019)",
