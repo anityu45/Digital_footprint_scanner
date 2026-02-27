@@ -1,9 +1,0 @@
-fastapi
-uvicorn
-celery
-redis
-requests
-streamlit
-pydantic
-watchdog
-duckduckgo-search
