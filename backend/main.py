@@ -9,9 +9,12 @@ from pydantic import BaseModel
 from backend.celery_worker import run_osint_scan
 from backend.database import create_scan_entry, get_scan_result, init_db
 from backend.osint.image_metadata_osint import collect_image_metadata
+from backend.auth.routes import router as auth_router
+from backend.auth.dependencies import get_current_user
+from fastapi import Depends
 
 app = FastAPI()
-
+app.include_router(auth_router)
 # Initialize DB
 init_db()
 
@@ -23,7 +26,7 @@ class ScanRequest(BaseModel):
 
 
 @app.post("/scan")
-def start_scan(request: ScanRequest):
+async def start_scan(request: ScanRequest, user=Depends(get_current_user)):
     # Auto-detect username from email local-part if not provided.
     if request.email and not request.username:
         request.username = request.email.split("@")[0]
@@ -31,7 +34,7 @@ def start_scan(request: ScanRequest):
     scan_id = str(uuid.uuid4())
 
     create_scan_entry(scan_id, request.email, request.username, request.domain)
-    run_osint_scan.delay(scan_id, request.email, request.username, request.domain)
+    run_osint_scan(scan_id, request.email, request.username, request.domain)
 
     return {
         "scan_id": scan_id,
@@ -41,7 +44,7 @@ def start_scan(request: ScanRequest):
 
 
 @app.get("/results/{scan_id}")
-def get_results(scan_id: str):
+async def get_results(scan_id: str, user=Depends(get_current_user)):
     result = get_scan_result(scan_id)
     if result:
         return result
@@ -84,7 +87,7 @@ if MULTIPART_AVAILABLE:
 else:
 
     @app.post("/osint/image-metadata")
-    async def scan_image_metadata_unavailable():
+    async def image_metadata(file: UploadFile, user=Depends(get_current_user)):
         raise HTTPException(
             status_code=503,
             detail="Image uploads require python-multipart. Install with: pip install python-multipart",
