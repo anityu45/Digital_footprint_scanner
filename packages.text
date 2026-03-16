@@ -1,0 +1,23 @@
+# System-level packages (apt)
+
+# Graphviz - graph visualization for OSINT mapping
+graphviz
+
+# MySQL client libraries - required for pymysql to connect
+default-libmysqlclient-dev
+
+# Build tools - needed for compiling some Python packages (bcrypt, cryptography)
+build-essential
+pkg-config
+
+# Python dev headers - required for native extensions
+python3-dev
+
+# Redis tools - useful for debugging Celery queues
+redis-tools
+
+# Image processing system libs - backing Pillow for EXIF extraction
+libjpeg-dev
+libpng-dev
+libwebp-dev
+libtiff-dev

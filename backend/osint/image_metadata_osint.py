@@ -1,108 +1,108 @@
-﻿from __future__ import annotations
+from PIL import Image, ExifTags
+import logging
 
-from pathlib import Path
-from typing import Any
+logger = logging.getLogger("osint_api")
 
-try:
-    from PIL import ExifTags, Image
-except ImportError:  # Pillow is optional until installed
-    ExifTags = None
-    Image = None
-
-
-def _convert_gps(value: Any) -> float | None:
-    """Convert EXIF GPS rational tuples into decimal coordinates."""
+def _to_decimal(coords, ref):
+    """Converts Degrees, Minutes, Seconds to Decimal Degrees."""
     try:
-        degrees = float(value[0][0]) / float(value[0][1])
-        minutes = float(value[1][0]) / float(value[1][1])
-        seconds = float(value[2][0]) / float(value[2][1])
-        return degrees + (minutes / 60.0) + (seconds / 3600.0)
-    except Exception:
+        d = float(coords[0])
+        m = float(coords[1])
+        s = float(coords[2])
+        decimal = d + (m / 60.0) + (s / 3600.0)
+        if ref in ['S', 'W']:
+            decimal = -decimal
+        return round(decimal, 6)
+    except:
         return None
 
-
-def _extract_gps(gps_info: dict[str, Any]) -> dict[str, float] | None:
-    lat = _convert_gps(gps_info.get("GPSLatitude"))
-    lon = _convert_gps(gps_info.get("GPSLongitude"))
-    if lat is None or lon is None:
-        return None
-
-    if gps_info.get("GPSLatitudeRef") == "S":
-        lat = -lat
-    if gps_info.get("GPSLongitudeRef") == "W":
-        lon = -lon
-
-    return {"latitude": round(lat, 6), "longitude": round(lon, 6)}
-
-
-def collect_image_metadata(image_path: str) -> dict[str, Any]:
-    """
-    Extract useful metadata from an image file.
-
-    Return schema:
-    {
-      "success": bool,
-      "file": {...},
-      "camera": {...},
-      "timestamps": {...},
-      "location": {...} | None,
-      "raw_exif": {...},
-      "error": str | None
-    }
-    """
-    path = Path(image_path)
-
-    if Image is None:
-        return {
-            "success": False,
-            "error": "Pillow is not installed. Run: pip install pillow",
-        }
-
-    if not path.exists() or not path.is_file():
-        return {"success": False, "error": "Image file not found"}
-
+def collect_image_metadata(file_path: str) -> dict:
     try:
-        with Image.open(path) as img:
-            exif = img.getexif()
+        img = Image.open(file_path)
+        exif = img._getexif()
+        if not exif:
+            return {"success": True, "metadata": {}, "location": None}
 
-            parsed_exif: dict[str, Any] = {}
-            for tag_id, value in exif.items():
-                tag_name = ExifTags.TAGS.get(tag_id, str(tag_id)) if ExifTags else str(tag_id)
-                parsed_exif[tag_name] = str(value)
+        readable_exif = {}
+        gps_info = {}
 
-            gps_raw = exif.get_ifd(0x8825) if hasattr(exif, "get_ifd") else None
-            gps_named: dict[str, Any] = {}
-            if gps_raw and ExifTags:
-                for gps_tag, gps_value in gps_raw.items():
-                    gps_name = ExifTags.GPSTAGS.get(gps_tag, str(gps_tag))
-                    gps_named[gps_name] = gps_value
+        for tag, value in exif.items():
+            tag_name = ExifTags.TAGS.get(tag, tag)
+            if tag_name == "GPSInfo":
+                for t in value:
+                    sub_tag = ExifTags.GPSTAGS.get(t, t)
+                    gps_info[sub_tag] = value[t]
+            else:
+                readable_exif[tag_name] = str(value)
 
-            location = _extract_gps(gps_named) if gps_named else None
+        # Build location data if GPS exists
+        location = None
+        if "GPSLatitude" in gps_info and "GPSLongitude" in gps_info:
+            lat = _to_decimal(gps_info["GPSLatitude"], gps_info.get("GPSLatitudeRef", "N"))
+            lon = _to_decimal(gps_info["GPSLongitude"], gps_info.get("GPSLongitudeRef", "E"))
+            if lat and lon:
+                location = {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "google_maps": f"https://www.google.com/maps?q={lat},{lon}"
+                }
 
-            return {
-                "success": True,
-                "file": {
-                    "name": path.name,
-                    "format": img.format,
-                    "mode": img.mode,
-                    "width": img.width,
-                    "height": img.height,
-                    "size_bytes": path.stat().st_size,
-                },
-                "camera": {
-                    "make": parsed_exif.get("Make"),
-                    "model": parsed_exif.get("Model"),
-                    "lens_model": parsed_exif.get("LensModel"),
-                    "software": parsed_exif.get("Software"),
-                },
-                "timestamps": {
-                    "date_time": parsed_exif.get("DateTime"),
-                    "date_time_original": parsed_exif.get("DateTimeOriginal"),
-                    "date_time_digitized": parsed_exif.get("DateTimeDigitized"),
-                },
-                "location": location,
-                "raw_exif": parsed_exif,
-                "error": None,
-            }
-    except Exception as exc:
-        return {"success": False, "error": f"Failed to read image metadata: {exc}"}
+        return {"success": True, "metadata": readable_exif, "location": location}
+    except Exception as e:
+        logger.error(f"Image Metadata Error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
