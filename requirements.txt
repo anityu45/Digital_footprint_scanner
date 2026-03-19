@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+python-jose[cryptography]
+passlib[bcrypt]
+pymysql
+redis
+celery
+httpx
+Pillow
+pydantic
