@@ -20,9 +20,9 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
 )
 
-# Fix for Windows: Set the correct event loop policy to avoid "Event loop is closed" errors
+# FIXED: Changed from Selector to Proactor to prevent httpx from dropping SSL connections on Windows
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 def calculate_risk(findings: list) -> int:
     """Calculates a dynamic risk score 0-100 based on findings."""
@@ -72,6 +72,7 @@ def run_osint_scan(self, scan_id: str, email: str, username: str, domain: str):
                         "source": "Sherlock",
                         "value": s.get("site"), 
                         "url": s.get("url"),
+                        "severity": "INFO"  # FIXED: Added severity so the UI doesn't crash!
                     })
 
             # 3. Check Domains (DNS Lookup)
