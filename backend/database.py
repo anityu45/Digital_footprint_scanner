@@ -2,13 +2,12 @@ import pymysql
 import json
 import logging
 from contextlib import contextmanager
+from typing import Optional
 from passlib.context import CryptContext
 from backend.config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
 
-# Setup logging for database errors
 logger = logging.getLogger("osint_api")
 
-# Configuration pulled from central config
 DB_CONFIG = {
     "host": DB_HOST,
     "port": DB_PORT,
@@ -23,19 +22,13 @@ _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # --- Helper Utilities ---
 
 def hash_password(plain: str) -> str:
-    """Hashes a plain-text password."""
     return _pwd_context.hash(plain)
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """Verifies a password against its hash."""
     return _pwd_context.verify(plain, hashed)
 
 @contextmanager
 def get_db_cursor():
-    """
-    Context manager that ensures connections are ALWAYS closed, 
-    preventing 'Too many connections' errors.
-    """
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
@@ -49,7 +42,6 @@ def get_db_cursor():
         conn.close()
 
 def init_db():
-    """Initializes the database schema if it doesn't exist."""
     with get_db_cursor() as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -77,13 +69,11 @@ def init_db():
 # --- Authentication Logic ---
 
 def get_user(username: str) -> dict:
-    """Fetches a user record by username."""
     with get_db_cursor() as c:
         c.execute("SELECT * FROM users WHERE username = %s", (username,))
         return c.fetchone()
 
 def create_user(username: str, password: str) -> None:
-    """Registers a new user."""
     hashed = hash_password(password)
     with get_db_cursor() as c:
         c.execute(
@@ -93,10 +83,7 @@ def create_user(username: str, password: str) -> None:
 
 # --- Scan Logic ---
 
-from typing import Optional
-
 def create_scan_entry(scan_id: str, owner: str, email: Optional[str] = None, username: Optional[str] = None, domain: Optional[str] = None) -> None:
-    """Initializes a scan record. Values not provided are stored as NULL."""
     with get_db_cursor() as c:
         c.execute(
             """
@@ -108,7 +95,6 @@ def create_scan_entry(scan_id: str, owner: str, email: Optional[str] = None, use
         )
 
 def update_scan_result(scan_id: str, findings: list, risk_score: int, status: str = "Completed") -> None:
-    """Updates the scan entry with results from the Celery worker."""
     with get_db_cursor() as c:
         c.execute(
             """
@@ -120,7 +106,6 @@ def update_scan_result(scan_id: str, findings: list, risk_score: int, status: st
         )
 
 def get_scan_result(scan_id: str) -> dict:
-    """Retrieves full scan results, safely parsing the JSON findings."""
     with get_db_cursor() as c:
         c.execute("SELECT * FROM scans WHERE scan_id = %s", (scan_id,))
         row = c.fetchone()
@@ -129,7 +114,6 @@ def get_scan_result(scan_id: str) -> dict:
         return row
 
 def get_scans_by_owner(owner: str, limit: int = 20, offset: int = 0) -> list:
-    """Paginated list of scans for a specific user."""
     with get_db_cursor() as c:
         c.execute(
             """
@@ -143,7 +127,7 @@ def get_scans_by_owner(owner: str, limit: int = 20, offset: int = 0) -> list:
         return c.fetchall()
 
 def delete_scan(scan_id: str, owner: str) -> bool:
-    """Deletes a scan if the owner matches."""
+    """Deletes a single scan if the requesting user is the owner."""
     with get_db_cursor() as c:
         c.execute(
             "DELETE FROM scans WHERE scan_id = %s AND owner = %s",
@@ -151,8 +135,21 @@ def delete_scan(scan_id: str, owner: str) -> bool:
         )
         return c.rowcount > 0
 
+def delete_all_scans_by_owner(owner: str) -> int:
+    """
+    Deletes ALL scans belonging to a user.
+    Called automatically on logout — no scan data remains in the
+    database after the user ends their session.
+    Returns the number of rows deleted.
+    """
+    with get_db_cursor() as c:
+        c.execute(
+            "DELETE FROM scans WHERE owner = %s",
+            (owner,),
+        )
+        return c.rowcount
+
 def mark_stale_scans_failed(minutes: int = 15) -> int:
-    """Marks any scans stuck in 'Running' state for longer than the specified minutes as 'Failed'."""
     with get_db_cursor() as c:
         c.execute(
             """
