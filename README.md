@@ -8,7 +8,7 @@
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)
 
-> An end-to-end Open Source Intelligence (OSINT) platform that scans an email address, username, or domain across global databases and returns a structured, risk-scored intelligence report — all behind a secure JWT-authenticated API and a clean Streamlit dashboard.
+> An end-to-end Open Source Intelligence (OSINT) platform that scans an email address, username, or domain across global databases and returns a structured, risk-scored intelligence report — all behind a secure JWT-authenticated API and a clean Streamlit dashboard. Scan data is held only for the duration of the session and permanently deleted the moment the user logs out.
 
 ---
 
@@ -21,17 +21,18 @@
    - [Email Breach Scan](#1-email-breach-scan)
    - [Username Scan](#2-username-scan)
    - [Domain DNS Scan](#3-domain-dns-scan)
-   - [Image Metadata (EXIF) Scan](#4-image-metadata-exif-scan)
+   - [Image Metadata EXIF Scan](#4-image-metadata-exif-scan)
 5. [Risk Scoring Engine](#-risk-scoring-engine)
 6. [Security Elements](#-security-elements)
-7. [Frontend Pages](#-frontend-pages)
-8. [API Reference](#-api-reference)
-9. [Installation Guide](#-installation-guide)
-10. [Running with Docker](#-running-with-docker)
-11. [Project File Structure](#-project-file-structure)
-12. [Environment Variables](#-environment-variables)
-13. [Known Limitations](#-known-limitations)
-14. [Future Improvements](#-future-improvements)
+7. [Privacy by Design](#-privacy-by-design)
+8. [Frontend Pages](#-frontend-pages)
+9. [API Reference](#-api-reference)
+10. [Installation Guide](#-installation-guide)
+11. [Running with Docker](#-running-with-docker)
+12. [Project File Structure](#-project-file-structure)
+13. [Environment Variables](#-environment-variables)
+14. [Known Limitations](#-known-limitations)
+15. [Future Improvements](#-future-improvements)
 
 ---
 
@@ -44,7 +45,7 @@ Nexus OSINT lets a registered user pick a target — an **email address**, a **u
 3. Resolves the domain to an **IP address via DNS**
 4. Extracts hidden **EXIF metadata and GPS coordinates** from uploaded images
 
-Every scan runs in the **background** (so the UI never freezes), stores results in a **MySQL database**, and returns a **0–100 risk score** based on what was found. All endpoints are protected by short-lived **JWT access tokens** with a Redis-backed **refresh + logout blacklist** system.
+Every scan runs in the **background** so the UI never freezes. Results are stored temporarily in MySQL during the session and returned with a **0–100 risk score**. All endpoints are protected by short-lived **JWT access tokens** with a Redis-backed blacklist system. When the user logs out, **all scan data is permanently deleted from the database automatically**.
 
 ---
 
@@ -57,13 +58,13 @@ Every scan runs in the **background** (so the UI never freezes), stores results 
 │   ┌─────────────┐  ┌─────────────┐  ┌────────────────────┐    │
 │   │   app.py    │  │ new_scan.py │  │   dashbord.py      │    │
 │   │  (Login /   │  │  (Launch    │  │  (History, Risk,   │    │
-│   │  Register)  │  │   a Scan)   │  │   Findings Table)  │    │
+│   │  Register)  │  │   a Scan)   │  │  Clear History)    │    │
 │   └─────────────┘  └─────────────┘  └────────────────────┘    │
 │          │                │                   │                 │
 │          └────────────────┴───────────────────┘                 │
-│                           │  api.py (HTTP requests)             │
+│                           │  api.py (all HTTP calls)            │
 └───────────────────────────│─────────────────────────────────────┘
-                            │  REST API calls (JSON)
+                            │
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   FASTAPI BACKEND  (port 8000)                  │
@@ -72,38 +73,33 @@ Every scan runs in the **background** (so the UI never freezes), stores results 
 │   │  /auth/*     │   │  /scans/*    │   │ /osint/image-    │  │
 │   │  Register    │   │  Start,Get,  │   │  metadata        │  │
 │   │  Login       │   │  List,Delete │   │  (synchronous)   │  │
-│   │  Logout      │   │              │   │                  │  │
-│   │  Refresh     │   │              │   │                  │  │
+│   │  Logout ─────│───► deletes ALL  │   │                  │  │
+│   │  (auto-wipe) │   │  scans on    │   │                  │  │
+│   │  Refresh     │   │  logout      │   │                  │  │
 │   └──────────────┘   └──────────────┘   └──────────────────┘  │
-│          │                  │                                   │
-│     JWT + Redis        Celery .delay()                         │
-└───────────────────────────────────────────────────────────────-─┘
+└─────────────────────────────────────────────────────────────────┘
          │                    │
          ▼                    ▼
 ┌──────────────┐   ┌──────────────────────────────────────────────┐
 │  REDIS       │   │         CELERY WORKER (background)           │
-│  • JWT       │   │                                              │
-│    blacklist │   │  ┌─────────────┐   ┌─────────────────────┐  │
-│  • Sherlock  │   │  │  breach_    │   │  username_osint.py  │  │
-│    site list │   │  │  osint.py   │   │  (Sherlock engine)  │  │
-│    cache     │   │  │  (XON API)  │   └─────────────────────┘  │
-│  • Celery    │   │  └─────────────┘                            │
-│    task      │   │  ┌──────────────────────────────────────┐   │
-│    broker +  │   │  │  DNS lookup (socket.gethostbyname)   │   │
-│    result    │   │  └──────────────────────────────────────┘   │
-│    backend   │   │                                              │
-└──────────────┘   │  Risk Score = calculate_risk(findings)       │
-                   └──────────────────────────────────────────────┘
-                                      │
-                                      ▼
-                        ┌─────────────────────────┐
-                        │   MYSQL DATABASE        │
-                        │                         │
-                        │   users table           │
-                        │   scans table           │
-                        │   (findings stored      │
-                        │    as JSON column)      │
-                        └─────────────────────────┘
+│              │   │                                              │
+│  JWT         │   │  breach_osint.py   → XposedOrNot API         │
+│  blacklist   │   │  username_osint.py → Sherlock 500+ sites     │
+│              │   │  DNS lookup        → socket.gethostbyname    │
+│  Sherlock    │   │                                              │
+│  site cache  │   │  calculate_risk(findings) → 0-100 score      │
+│              │   │  update_scan_result() → writes to MySQL      │
+│  Celery      │   │                                              │
+│  broker      │   └──────────────────────────────────────────────┘
+└──────────────┘                    │
+                                    ▼
+                     ┌──────────────────────────┐
+                     │      MYSQL DATABASE      │
+                     │                          │
+                     │  users  (permanent)      │
+                     │  scans  (session-only,   │
+                     │          wiped on logout)│
+                     └──────────────────────────┘
 ```
 
 ---
@@ -125,40 +121,92 @@ FastAPI validates JWT → checks Redis blacklist → if clean, continues
         └── Sends task to Celery via Redis broker:
             run_osint_scan.delay(scan_id, email, username, domain)
         │
-        │  Returns immediately:  { "scan_id": "uuid", "status": "queued" }
+        │  Returns immediately: { "scan_id": "uuid", "status": "queued" }
         ▼
-Frontend starts polling GET /scans/{scan_id} every 2 seconds
+Frontend polls GET /scans/{scan_id} every 2 seconds
 
 Meanwhile, in the Celery Worker:
-        │
-        ├── If email  → calls XposedOrNot API → gets breach list
-        ├── If username → fetches Sherlock site list → probes each site
-        └── If domain  → DNS resolve → get IP address
+        ├── email    → XposedOrNot API → breach list
+        ├── username → Sherlock site list → 500 concurrent probes
+        └── domain   → socket.gethostbyname → IP address
         │
         └── calculate_risk(findings) → 0-100 score
-        │
         └── UPDATE MySQL: status="Completed", findings=[...], risk_score=N
 
 Frontend poll hits "Completed" → renders findings table + risk score
 ```
 
-### Image Metadata (Synchronous — No Queue)
+### Logout — Automatic Data Wipe
+
+```
+User logs out
+        │
+        │  POST /auth/logout
+        │  Authorization: Bearer <access_token>
+        ▼
+FastAPI verifies token is valid and extracts username
+        │
+        ├── Step 1: delete_all_scans_by_owner(username)
+        │       DELETE FROM scans WHERE owner = username
+        │       Every scan this user ran is permanently deleted
+        │
+        └── Step 2: redis_client.setex("blacklist:<token>", 3600, "true")
+                Token blacklisted — cannot be reused
+        │
+        Returns:
+        {
+          "message": "Logged out successfully. All session data has been erased.",
+          "scans_deleted": 3
+        }
+        ▼
+Frontend clears session_state.access_token → user returned to login page
+Nothing remains in the database
+```
+
+### Manual History Clear — From Dashboard
+
+```
+User opens Dashboard
+        │
+        ▼
+Clicks "Clear All History" button
+        │
+        ▼
+Two-step confirmation shown
+(prevents accidental deletion)
+        │
+        ▼
+User confirms → api.py loops through all scan IDs
+        │
+        │  DELETE /scans/{scan_id}  for each scan
+        │  (uses existing endpoint — no new backend route needed)
+        ▼
+All scan records deleted from MySQL
+Dashboard refreshes → shows empty state
+```
+
+### Image Metadata — No Queue, Synchronous
 
 ```
 User uploads image in image_tools.py
         │
         │  POST /osint/image-metadata  (multipart/form-data)
         ▼
-FastAPI saves file to a temp path → calls collect_image_metadata(path)
+FastAPI writes bytes to a temp file on disk
         │
-        ├── Pillow reads EXIF tags
-        ├── Extracts GPS IFD if present
-        └── Converts DMS → Decimal Degrees
-        │
-        │  Returns immediately: { metadata: {...}, location: {lat, lon} }
         ▼
-Frontend shows map pin + Google Maps link + raw metadata JSON
-Temp file deleted from disk immediately after
+collect_image_metadata(temp_path) called
+        ├── Pillow reads all EXIF tags
+        ├── Extracts GPS IFD separately
+        └── Converts DMS coords to Decimal Degrees
+            builds Google Maps URL (no API key needed)
+        │
+        ▼
+Temp file deleted from disk immediately
+        │
+        ▼
+Returns: { metadata: {...}, location: { lat, lon, google_maps } }
+Frontend shows map pin + Maps link + raw metadata JSON
 ```
 
 ---
@@ -169,19 +217,14 @@ Temp file deleted from disk immediately after
 
 **File:** `breach_osint.py`
 
-**What it does:** Queries the free [XposedOrNot](https://xposedornot.com/) API to check if an email address appears in any publicly known data breach.
+**What it does:** Queries the XposedOrNot API to check if an email appeared in any publicly known data breach. Security researchers monitor dark web forums and hacker communities where stolen credential dumps are posted. They collect those dumps, strip the passwords, and record only the email address and the breach name. Your tool queries this database — it never accesses raw breach data or passwords.
 
 **Input:**
 ```
 email: str  →  e.g. "someone@gmail.com"
 ```
 
-**What happens inside:**
-- The email is URL-encoded (handles `+` aliases and special characters safely)
-- An HTTP GET is sent to `https://api.xposedornot.com/v1/check-email/{email}`
-- Response is parsed for a list of breach names
-
-**Output (list of finding dicts):**
+**Output:**
 ```json
 [
   { "name": "LinkedIn",  "severity": "HIGH", "source": "XposedOrNot" },
@@ -189,16 +232,16 @@ email: str  →  e.g. "someone@gmail.com"
 ]
 ```
 
-**Response code handling:**
+**Response handling:**
 
 | HTTP Code | Meaning | Action |
 |-----------|---------|--------|
 | 200 | Breaches found | Parse and return list |
-| 404 | No breaches found (clean email) | Return empty list |
-| 429 | Rate limited by XON | Log warning, return empty list |
+| 404 | Clean email — no breaches | Return empty list |
+| 429 | Rate limited | Log warning, return empty list |
 | 5xx | API error | Log error, return empty list |
 
-**Timeout:** 15 seconds. If the API hangs, the module gives up and logs a timeout error — it does not block the whole scan.
+Timeout: 15 seconds.
 
 ---
 
@@ -206,97 +249,82 @@ email: str  →  e.g. "someone@gmail.com"
 
 **File:** `username_osint.py`
 
-**What it does:** Uses the [Sherlock](https://github.com/sherlock-project/sherlock) site database (500+ platforms) to check if a username is registered on each platform.
+**What it does:** Uses the Sherlock project's database of 500+ platforms. For each platform it builds the profile URL with the username inserted, fires all requests simultaneously using async Python, and checks whether the profile exists.
 
 **Input:**
 ```
 username: str  →  e.g. "johndoe"
 ```
 
-**What happens inside:**
+**Detection methods:**
 
-```
-Step 1 — Fetch site list
-    Check Redis cache (key: "sherlock_sites", TTL 24 hours)
-        → If cached: use it immediately
-        → If not: fetch from Sherlock GitHub JSON, then cache it
+| Type | Logic |
+|------|-------|
+| `status_code` | HTTP 200 = profile exists, 404 = does not |
+| `message` | Site always returns 200 — checks if error text is absent from the page |
+| Redirect guard | Redirected to login page = false positive, skip |
 
-Step 2 — Build probe tasks
-    For each site in the list (up to SHERLOCK_SITE_LIMIT, default 500):
-        Build the profile URL: e.g. https://github.com/johndoe
-        Create an async probe task
+**Sherlock site list cached in Redis for 24 hours** — downloaded from GitHub once per day, loaded instantly for every scan after.
 
-Step 3 — Run all probes concurrently
-    asyncio.gather(*tasks) fires all HTTP probes at once
+**Fallback:** If GitHub fetch fails, 10 hardcoded popular platforms are used so the scan never completely fails.
 
-Step 4 — Per probe decision:
-    errorType == "status_code"  → 200 means "found"
-    errorType == "message"      → site returns a specific string if user NOT found
-                                  absence of that string = user found
-    Redirect to login page      → false positive, skip
-```
-
-**Output (list of finding dicts):**
+**Output:**
 ```json
 [
-  { "site": "GitHub",    "url": "https://github.com/johndoe" },
-  { "site": "Reddit",    "url": "https://www.reddit.com/user/johndoe/" },
-  { "site": "TikTok",    "url": "https://www.tiktok.com/@johndoe" }
+  { "site": "GitHub",  "url": "https://github.com/johndoe" },
+  { "site": "Reddit",  "url": "https://www.reddit.com/user/johndoe/" },
+  { "site": "TikTok",  "url": "https://www.tiktok.com/@johndoe" }
 ]
 ```
-
-**Fallback:** If the Sherlock GitHub JSON cannot be fetched, a hardcoded list of 10 popular platforms (GitHub, Twitter, Instagram, Reddit, etc.) is used so the scan never completely fails.
-
-**Timeout per probe:** 15 seconds. Slow sites are skipped silently.
 
 ---
 
 ### 3. Domain DNS Scan
 
-**File:** `celery_worker.py` (inline, no separate module)
+**File:** `celery_worker.py` (inline)
 
-**What it does:** Resolves a domain name to its IP address using a standard DNS lookup.
+**What it does:** Resolves a domain name to its IP address using Python's built in `socket` library. No external API, no API key, no rate limiting.
 
 **Input:**
 ```
 domain: str  →  e.g. "example.com"
 ```
 
-**What happens inside:**
-- Calls Python's built-in `socket.gethostbyname(domain)`
-- No external API call, no rate limiting
-
-**Output:**
+**Output — resolved:**
 ```json
 { "type": "domain", "source": "DNS", "value": "Resolved IP: 93.184.216.34", "severity": "INFO" }
 ```
-or if the domain cannot be resolved:
+
+**Output — unresolvable:**
 ```json
 { "type": "domain", "source": "DNS", "value": "Domain could not be resolved.", "severity": "LOW" }
 ```
 
 ---
 
-### 4. Image Metadata (EXIF) Scan
+### 4. Image Metadata EXIF Scan
 
 **File:** `image_metadata_osint.py`
 
-**What it does:** Reads the hidden EXIF data embedded in a JPEG or PNG image — including camera model, software, timestamps, and GPS coordinates if the photo was taken on a phone.
+**What it does:** Every photo taken on a phone or camera contains a hidden layer of data embedded inside the image file called EXIF. It includes device info, software, timestamps, and often GPS coordinates — invisible to the eye but fully readable by Pillow.
 
 **Input:**
 ```
-file_path: str  →  path to a temporary file saved by FastAPI
+file_path: str  →  path to temp file saved by FastAPI
 ```
 
-**What happens inside:**
-- Pillow opens the image and reads all EXIF tags
-- Binary blobs (e.g. MakerNote) are replaced with `"<binary data omitted>"` to keep the JSON clean
-- GPS IFD (Image File Directory) is read separately using the modern `exif.get_ifd()` method
-- GPS coordinates in Degrees/Minutes/Seconds are converted to standard Decimal Degrees:
-  ```
-  Decimal = Degrees + (Minutes / 60) + (Seconds / 3600)
-  Negative for South latitude or West longitude
-  ```
+**GPS conversion formula:**
+```
+Raw in image:  (10°, 0', 54.0")  ref: N
+Formula:       10 + (0 / 60) + (54.0 / 3600) = 10.015000
+South or West: multiply result by -1
+```
+
+**Google Maps URL — no API key needed:**
+```python
+f"https://www.google.com/maps?q={lat},{lon}"
+# Google Maps accepts coordinates directly in URL as a public feature
+```
 
 **Output:**
 ```json
@@ -316,9 +344,7 @@ file_path: str  →  path to a temporary file saved by FastAPI
 }
 ```
 
-If no GPS data exists, `"location"` will be `null`. If no EXIF data exists at all, `"metadata"` will be `{}`.
-
-**Supported formats:** JPEG, PNG only. File is deleted from disk immediately after the scan completes.
+The image file is deleted from disk immediately after Pillow reads it. It is never written to MySQL or Redis.
 
 ---
 
@@ -326,51 +352,46 @@ If no GPS data exists, `"location"` will be `null`. If no EXIF data exists at al
 
 **File:** `celery_worker.py` → `calculate_risk(findings)`
 
-After all modules finish, a single integer score from **0 to 100** is calculated:
-
 | Finding Type | Severity | Points Added |
 |---|---|---|
 | `breach` | CRITICAL | +25 |
-| `breach` | HIGH / any other | +15 |
-| `username` | (any) | +5 per platform found |
-| `domain` | (any) | +10 |
+| `breach` | HIGH / other | +15 |
+| `username` | any | +5 per platform found |
+| `domain` | any | +10 |
 
-The score is capped at 100. A clean target with no findings returns 0.
-
-**Example:** An email found in 3 breaches = 3 × 15 = **45 / 100 risk score**.
+Capped at 100. Clean target with no findings returns 0.
 
 ---
 
 ## 🔐 Security Elements
 
-### Authentication Flow
+### Full Authentication Flow
 
 ```
-Register  →  password hashed with bcrypt (passlib)  →  stored in MySQL
+Register  →  password hashed with bcrypt  →  stored in MySQL
 
 Login     →  bcrypt verify  →  issue:
-               Access Token  (JWT, 30 min expiry)
-               Refresh Token (JWT, 7 day expiry)
+               Access Token  (JWT, expires in 30 minutes)
+               Refresh Token (JWT, expires in 7 days)
 
-Every protected API call:
-    Client sends:  Authorization: Bearer <access_token>
-    Server checks:
-        1. Header present and formatted correctly?
-        2. Token in Redis blacklist?  (if yes → 401)
-        3. JWT signature valid?
-        4. Token type == "access"?
-        5. Username ("sub") present in payload?
+Every protected API call — 5 checks in order:
+    1. Authorization header present and starts with "Bearer "?
+    2. Token in Redis blacklist?           → if yes: 401 immediately
+    3. JWT signature valid?                → if no:  401
+    4. Token type == "access"?             → if no:  401
+    5. Username ("sub") present in payload?→ if no:  401
     All pass → extract username → proceed
 
-Logout    →  access token added to Redis blacklist with 1-hour TTL
-             (token expires naturally anyway, but blacklist prevents
-              reuse within that window)
+Logout    →  Step 1: permanently delete ALL scans owned by this user
+             Step 2: add token to Redis blacklist with 1 hour TTL
+             Token is dead immediately — not after 30 minutes
 
-Refresh   →  client sends refresh_token → server verifies type == "refresh"
-             → issues a new access token
+Refresh   →  client sends refresh_token
+          →  server verifies type == "refresh"
+          →  issues a brand new access token
 ```
 
-### JWT Token Structure
+### JWT Token Contents
 
 ```json
 {
@@ -382,102 +403,149 @@ Refresh   →  client sends refresh_token → server verifies type == "refresh"
 
 ### Rate Limiting
 
-The image metadata endpoint is rate-limited to **15 requests per minute per IP address** using SlowAPI. Exceeding this returns HTTP 429.
+Image metadata endpoint is limited to **15 requests per minute per IP**. Exceeding this returns HTTP 429. Enforced by SlowAPI.
 
-### Scan Ownership
+### Scan Ownership Enforcement
 
-Every scan row in MySQL stores the `owner` field (the logged-in username). The API always filters by `owner` when listing or deleting scans — a user cannot read or delete another user's scans.
+Every scan row stores the `owner` field. Every query filters by owner — a user can never access another user's data:
+
+```sql
+SELECT * FROM scans WHERE owner = %s
+DELETE FROM scans WHERE scan_id = %s AND owner = %s
+```
 
 ### Stale Scan Cleanup
 
-On startup and every 5 minutes, a background task runs `mark_stale_scans_failed()`. Any scan stuck in `"Running"` status for more than 15 minutes is automatically marked as `"Failed"` with an explanatory error finding. This prevents the frontend from polling forever if the Celery worker crashed.
+On startup and every 5 minutes a background task runs. Any scan stuck in `"Running"` for more than 15 minutes is marked `"Failed"` automatically. The `created_at` timestamp (set by MySQL automatically on insert) is used for this check:
+
+```sql
+WHERE status = 'Running'
+AND created_at < DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+```
 
 ### Input Validation
 
-The `ScanRequest` Pydantic model enforces that **exactly one** of `email`, `username`, or `domain` is provided and non-empty. Providing two fields, zero fields, or empty strings all return HTTP 422 with a clear error message.
+`ScanRequest` Pydantic model enforces exactly **one** of `email`, `username`, or `domain` is provided and non-empty. Two fields, zero fields, or empty strings all return HTTP 422 before any scan logic runs.
+
+---
+
+## 🛡️ Privacy by Design
+
+The core privacy principle — **scan data exists only as long as it is needed.**
+
+### Why Scans Are Stored At All
+
+Celery runs in a separate process from FastAPI. The only way for the background worker to communicate results back to the frontend is through the shared MySQL database. The frontend polls `GET /scans/{scan_id}` every 2 seconds — that query reads from MySQL. Without this, there is no way to return results from a background process to the user.
+
+The database is a temporary working space, not a permanent data store.
+
+### When Scans Are Deleted
+
+| Trigger | What Happens | How |
+|---|---|---|
+| User logs out | All scans deleted automatically | `DELETE FROM scans WHERE owner = username` in logout endpoint |
+| User clicks Clear All History | All scans deleted manually | `clear_all_scans()` loops through each scan ID and calls DELETE |
+| User deletes one scan | Single scan deleted | `DELETE FROM scans WHERE scan_id = ? AND owner = ?` |
+
+### Logout Response Confirms Deletion
+
+```json
+{
+  "message": "Logged out successfully. All session data has been erased.",
+  "scans_deleted": 3
+}
+```
+
+The response tells the frontend exactly how many records were wiped — no ambiguity.
+
+### Images Are Never Stored
+
+Uploaded images never touch MySQL or Redis. FastAPI writes to a temp file, Pillow reads it, temp file is deleted — all within a single request. Nothing persists after the response is returned.
 
 ---
 
 ## 🖥️ Frontend Pages
 
-All frontend pages are built with **Streamlit** and communicate with the FastAPI backend via the `api.py` helper module.
+### `app.py` — Login and Registration
 
-### `app.py` — Login & Registration
-
-- Entry point of the entire platform
-- Two tabs: **Authentication** and **New Operative Registration**
-- On successful login, the JWT access token is saved in `st.session_state.access_token`
-- All other pages check for this token at the top; if missing, they show an "UNAUTHORIZED" message and stop
+Entry point of the platform. Two tabs — Authentication and New Operative Registration. On login the JWT access token is saved in `st.session_state.access_token`. Every other page checks for this at the top and stops with an unauthorized warning if missing.
 
 ### `new_scan.py` — Launch a Scan
 
-- Radio button to choose target type: Email / Username / Domain
-- Text input for the target value
-- On submit: calls `POST /scans`, gets back a `scan_id`
-- Polls `GET /scans/{scan_id}` every 2 seconds (up to 300 polls = ~10 minutes)
-- A visual progress bar updates as polling continues
-- When scan completes: shows a Risk Score metric, total findings count, and a full findings table with clickable URLs
+Radio button to choose target type (Email / Username / Domain). Text input for the value. On submit calls `POST /scans`, receives a `scan_id`, then polls `GET /scans/{scan_id}` every 2 seconds with a live progress bar. When complete shows risk score, total findings count, and a full findings table with clickable URLs.
 
 ### `dashbord.py` — Operations History
 
-- Fetches all scans owned by the logged-in user
-- Shows three summary metrics: total scans, completed scans, average risk score
-- An interactive table of all scans with timestamps
-- A dropdown to select any scan ID and decrypt (fetch) its full findings payload
+Shows all scans belonging to the logged in user. Three summary metrics at the top — total operations, successful traces, average risk score.
+
+**Clear All History** — sits next to the Trace History heading. First click shows a two-step confirmation warning. Confirming permanently deletes every scan record from MySQL and refreshes the page immediately.
+
+**Decrypt Specific Payload** — select any scan ID from a dropdown to fetch and display its full findings.
 
 ### `image_tools.py` — EXIF Forensics
 
-- File uploader (JPEG/PNG only)
-- Shows a preview of the uploaded image
-- On "Run Forensic Analysis": calls `POST /osint/image-metadata`
-- If GPS coordinates are found: renders an interactive map pin and a Google Maps link
-- Shows all extracted EXIF metadata in a collapsible JSON viewer
+File uploader for JPEG and PNG. Shows image preview. On analysis renders an interactive OpenStreetMap pin if GPS coordinates are found, a clickable Google Maps link, and all raw EXIF metadata in a collapsible JSON viewer.
+
+### `api.py` — Centralized API Layer
+
+Every HTTP call from every frontend page goes through this one file. No page makes direct HTTP calls itself.
+
+| Function | Endpoint Called | Purpose |
+|---|---|---|
+| `login()` | POST /auth/login | Get access and refresh tokens |
+| `register()` | POST /auth/register | Create a new account |
+| `get_scans()` | GET /scans | List all scans for current user |
+| `start_scan()` | POST /scans | Queue a new background scan |
+| `get_scan_result()` | GET /scans/{id} | Fetch result of one scan |
+| `delete_scan()` | DELETE /scans/{id} | Delete a single scan |
+| `clear_all_scans()` | DELETE /scans/{id} × N | Loop and delete all scans |
+| `analyze_image()` | POST /osint/image-metadata | Extract EXIF from image |
 
 ---
 
 ## 📡 API Reference
 
-All endpoints live at `http://localhost:8000` by default.
+Base URL: `http://localhost:8000`
 
 ### Authentication
 
 | Method | Endpoint | Body | Auth Required | Description |
 |--------|----------|------|---------------|-------------|
-| POST | `/auth/register` | `{username, password}` | No | Create a new account |
-| POST | `/auth/login` | `{username, password}` | No | Get access + refresh tokens |
-| POST | `/auth/refresh` | `{refresh_token}` | No | Get a new access token |
-| POST | `/auth/logout` | — | Yes (Bearer) | Blacklist the current access token |
+| POST | `/auth/register` | `{username, password}` | No | Create account |
+| POST | `/auth/login` | `{username, password}` | No | Get tokens |
+| POST | `/auth/refresh` | `{refresh_token}` | No | New access token |
+| POST | `/auth/logout` | — | Yes | Blacklist token + delete all scans |
 
 ### Scans
 
 | Method | Endpoint | Body / Query | Auth Required | Description |
 |--------|----------|------|---------------|-------------|
-| POST | `/scans` | `{email OR username OR domain}` | Yes | Start a new background scan |
-| GET | `/scans` | `?limit=10&offset=0` | Yes | List all your past scans |
-| GET | `/scans/{scan_id}` | — | Yes | Get full results of a specific scan |
-| DELETE | `/scans/{scan_id}` | — | Yes | Delete a scan you own |
+| POST | `/scans` | `{email OR username OR domain}` | Yes | Start background scan |
+| GET | `/scans` | `?limit=10&offset=0` | Yes | List your scans |
+| GET | `/scans/{scan_id}` | — | Yes | Get full scan result |
+| DELETE | `/scans/{scan_id}` | — | Yes | Delete one scan |
 
 ### OSINT
 
 | Method | Endpoint | Body | Auth Required | Description |
 |--------|----------|------|---------------|-------------|
-| POST | `/osint/image-metadata` | `multipart/form-data: file` | Yes | Extract EXIF from image |
-| GET | `/health` | — | No | Check if the API is running |
+| POST | `/osint/image-metadata` | `multipart: file` | Yes | Extract EXIF metadata |
+| GET | `/health` | — | No | API health check |
 
-### Response: Start Scan
-```json
-HTTP 202 Accepted
-{
-  "scan_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "queued"
-}
-```
-
-### Response: Get Scan Result
+### Logout Response
 ```json
 HTTP 200 OK
 {
-  "scan_id": "550e8400-...",
+  "message": "Logged out successfully. All session data has been erased.",
+  "scans_deleted": 3
+}
+```
+
+### Scan Result Response
+```json
+HTTP 200 OK
+{
+  "scan_id": "550e8400-e29b-41d4-a716-446655440000",
   "owner": "admin",
   "email": "target@example.com",
   "username": null,
@@ -507,7 +575,7 @@ HTTP 200 OK
 - Redis running locally
 - pip
 
-### Step-by-Step Setup
+### Step-by-Step
 
 **1. Clone the repository**
 ```bash
@@ -515,7 +583,7 @@ git clone https://github.com/yourusername/nexus-osint.git
 cd nexus-osint
 ```
 
-**2. Create a virtual environment**
+**2. Create virtual environment**
 ```bash
 python -m venv venv
 
@@ -532,17 +600,14 @@ pip install -r requirements.txt
 ```
 
 **4. Set up environment variables**
-
-Copy the example env file and fill in your values:
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Minimum required values in `.env`:
 ```
 SECRET_KEY=your-strong-random-secret-key
 DB_HOST=localhost
-DB_PORT=3306
 DB_USER=root
 DB_PASSWORD=your_mysql_password
 DB_NAME=osint_db
@@ -553,7 +618,8 @@ REDIS_URL=redis://localhost:6379/0
 ```bash
 python setup_db.py
 ```
-This creates the `users` and `scans` tables and adds a default `admin` user.
+
+Creates the `users` and `scans` tables and adds a default admin user.
 
 **6. Start the FastAPI backend**
 ```bash
@@ -570,19 +636,15 @@ celery -A backend.celery_worker.celery_app worker --loglevel=info
 streamlit run frontend/app.py
 ```
 
-The dashboard opens at `http://localhost:8501`.
+Opens at `http://localhost:8501`
 
 ---
 
 ## 🐳 Running with Docker
 
-Docker Compose starts all four services (Redis, MySQL, API, Celery worker) with a single command. The Streamlit frontend still runs locally since it is a development UI.
-
 ```bash
 docker-compose up --build
 ```
-
-Services started:
 
 | Service | Port | Description |
 |---------|------|-------------|
@@ -591,12 +653,11 @@ Services started:
 | `api` | 8000 | FastAPI backend |
 | `worker` | — | Celery background worker |
 
-To stop everything:
 ```bash
 docker-compose down
 ```
 
-> **Note:** When running the frontend locally against Docker, make sure `BASE_URL` in `frontend/api.py` is set to `http://localhost:8000`.
+> When running the Streamlit frontend locally against a Docker backend, ensure `BASE_URL` in `frontend/api.py` is set to `http://localhost:8000`.
 
 ---
 
@@ -606,35 +667,38 @@ docker-compose down
 nexus-osint/
 │
 ├── backend/
-│   ├── main.py                  # FastAPI app, all route definitions, startup logic
-│   ├── config.py                # All settings loaded from .env
-│   ├── database.py              # MySQL connection, all DB queries
-│   ├── celery_worker.py         # Background task: orchestrates all OSINT modules
-│   ├── limiter.py               # SlowAPI rate limiter instance
-│   ├── setup_db.py              # One-time DB init + admin user creation
+│   ├── main.py                      # FastAPI app, all route definitions, startup logic
+│   ├── config.py                    # All settings loaded from .env
+│   ├── database.py                  # MySQL connection, all DB queries
+│   │                                  + delete_all_scans_by_owner() for logout wipe
+│   ├── celery_worker.py             # Background task, runs all OSINT modules
+│   ├── limiter.py                   # SlowAPI rate limiter instance
+│   ├── setup_db.py                  # One-time DB init + default admin user
 │   │
 │   ├── auth/
-│   │   ├── routes.py            # /auth/register, login, logout, refresh endpoints
-│   │   ├── jwt_handler.py       # Token creation and verification helpers
-│   │   └── dependencies.py      # get_current_user() FastAPI dependency
+│   │   ├── routes.py                # /auth/* endpoints
+│   │   │                              logout auto-deletes all user scans
+│   │   ├── jwt_handler.py           # Token creation and verification helpers
+│   │   └── dependencies.py          # get_current_user() FastAPI dependency
 │   │
 │   └── osint/
-│       ├── breach_osint.py      # Email → XposedOrNot breach check
-│       ├── username_osint.py    # Username → Sherlock platform probe
-│       └── image_metadata_osint.py  # Image → EXIF + GPS extraction
+│       ├── breach_osint.py          # Email → XposedOrNot API
+│       ├── username_osint.py        # Username → Sherlock 500+ platform probe
+│       └── image_metadata_osint.py  # Image → Pillow EXIF + GPS extraction
 │
 ├── frontend/
-│   ├── app.py                   # Login / Register page (entry point)
-│   ├── new_scan.py              # Launch a scan + live polling + results
-│   ├── dashbord.py              # History table + payload decryption
-│   ├── image_tools.py           # EXIF forensics + map visualization
-│   └── api.py                   # All HTTP calls to the backend (centralized)
+│   ├── app.py                       # Login / Register entry point
+│   ├── new_scan.py                  # Launch scan + live polling + results display
+│   ├── dashbord.py                  # History table + Clear All History button
+│   ├── image_tools.py               # EXIF forensics + map + metadata viewer
+│   └── api.py                       # All HTTP calls centralized
+│                                      + delete_scan() and clear_all_scans()
 │
-├── docker-compose.yml           # Starts MySQL, Redis, API, Worker
-├── Dockerfile                   # Container build instructions
-├── requirements.txt             # All Python dependencies
-├── .env                         # Your secrets (never commit this)
-└── .env.example                 # Template for .env
+├── docker-compose.yml               # Starts all 4 services
+├── Dockerfile                       # Container build
+├── requirements.txt                 # All Python dependencies
+├── .env                             # Your secrets (never commit this)
+└── .env.example                     # Template for .env
 ```
 
 ---
@@ -643,7 +707,7 @@ nexus-osint/
 
 | Variable | Default | Description |
 |---|---|---|
-| `SECRET_KEY` | (unsafe default) | JWT signing key — change this in production |
+| `SECRET_KEY` | (unsafe default) | JWT signing key — always change in production |
 | `DB_HOST` | `localhost` | MySQL host |
 | `DB_PORT` | `3306` | MySQL port |
 | `DB_USER` | `root` | MySQL username |
@@ -651,7 +715,7 @@ nexus-osint/
 | `DB_NAME` | `osint_db` | MySQL database name |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
 | `SHERLOCK_DATA_URL` | GitHub raw JSON | Sherlock platform list source |
-| `SHERLOCK_SITE_LIMIT` | `500` | Max number of sites to probe per username scan |
+| `SHERLOCK_SITE_LIMIT` | `500` | Max platforms to probe per username scan |
 | `ALLOWED_ORIGINS` | `localhost:3000,localhost:8501` | CORS allowed origins |
 | `ENV` | `development` | Environment mode |
 
@@ -659,24 +723,29 @@ nexus-osint/
 
 ## ⚠️ Known Limitations
 
-- **Sherlock false positives:** Some platforms return HTTP 200 for any username (even non-existent ones). The false-positive check (redirect-to-login detection) catches the most common cases but is not perfect.
-- **XON rate limits:** The XposedOrNot free API has undocumented rate limits. Running many email scans back-to-back may trigger 429 responses. Add a delay between scans if automating.
-- **Image metadata only (no AI analysis):** The image module reads raw EXIF tags. It does not perform facial recognition or object detection.
-- **DNS only (no WHOIS):** The domain module only does a simple DNS lookup. Full WHOIS or SSL certificate inspection is not yet implemented.
-- **Blacklist TTL mismatch:** The logout blacklist TTL in Redis is hardcoded at 1 hour, but access tokens expire in 30 minutes. The blacklist window is intentionally larger but the unused 30 minutes is technically wasted Redis storage.
+- **Plain text during session** — scan findings are stored as readable JSON in MySQL while the session is active. Encryption at rest is the logical next hardening step.
+- **Sherlock false positives** — some platforms return HTTP 200 for any username. The login-redirect detection handles most cases but is not perfect.
+- **XON rate limits** — the XposedOrNot free API has undocumented rate limits. Many rapid email scans may trigger 429 responses.
+- **DNS only for domains** — the domain module only resolves IP addresses. WHOIS, port scanning, and Shodan integration are planned next.
+- **No HTTPS enforcement** — all security layers are undermined without TLS in production. The API runs plain HTTP by default.
+- **SECRET_KEY unsafe default** — always set a strong key in `.env` before any real use.
+- **Blacklist TTL mismatch** — logout blacklist TTL is 1 hour but tokens expire in 30 minutes. The extra 30 minutes is harmless but wasted Redis storage.
+- **Clear All History uses N requests** — the manual clear loops through each scan ID individually rather than a single bulk delete call. For users with many scans this could be slow. A dedicated `DELETE /scans` bulk endpoint would fix this.
 
 ---
 
 ## 🚀 Future Improvements
 
-- **WHOIS & SSL Scan:** Enrich domain scans with registrar info and certificate details
-- **Shodan Integration:** Look up open ports and exposed services for an IP address
-- **Email Header Analyzer:** Paste raw email headers to trace the sending mail server
-- **Export to PDF:** Download any scan result as a formatted intelligence report
-- **Admin Panel:** View all scans across all users (admin-only role)
-- **Webhook Notifications:** POST to a URL when a long-running scan completes
-- **Password Strength Audit:** Cross-check breached passwords against a hashed dictionary
-- **Streamlit → React frontend:** Replace the Streamlit UI with a proper React dashboard for production deployments
+- **Encryption at rest** — encrypt the findings column in MySQL so scan data is unreadable even during an active session
+- **Bulk delete endpoint** — single `DELETE /scans` API call to replace the current loop in `clear_all_scans()`
+- **Auto-expiry** — automatically delete scans after a configurable time window even without logout
+- **WHOIS lookup** — registrar info, owner details, registration and expiry dates for domain scans
+- **Shodan integration** — open ports, running services, known CVE vulnerabilities for any resolved IP address
+- **PDF export** — download any completed scan as a formatted intelligence report
+- **Email header analyzer** — paste raw email headers to trace the originating mail server
+- **Admin panel** — platform-wide scan count statistics for administrators
+- **Webhook notifications** — POST to a configured URL when a long-running scan completes
+- **React frontend** — replace Streamlit with a full React dashboard for production deployments
 
 ---
 
@@ -684,4 +753,4 @@ nexus-osint/
 
 This project is licensed under the MIT License.
 
-> **Ethical Use Notice:** This tool is designed for personal digital footprint awareness, security research, and authorized OSINT investigations only. Do not use it to scan individuals without their knowledge and consent. The authors are not responsible for misuse.
+> **Ethical Use Notice:** This tool is designed for personal digital footprint awareness, security research, and authorized OSINT investigations only. Do not use it to scan individuals without their knowledge and consent. All sources used are publicly available — breach notification APIs and public platform profile pages. The authors are not responsible for misuse.
