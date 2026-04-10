@@ -710,8 +710,6 @@ nexus-osint/
 | `SECRET_KEY` | (unsafe default) | JWT signing key — always change in production |
 | `DB_HOST` | `localhost` | MySQL host |
 | `DB_PORT` | `3306` | MySQL port |
-| `DB_USER` | `root` | MySQL username |
-| `DB_PASSWORD` | `root@123` | MySQL password |
 | `DB_NAME` | `osint_db` | MySQL database name |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
 | `SHERLOCK_DATA_URL` | GitHub raw JSON | Sherlock platform list source |
